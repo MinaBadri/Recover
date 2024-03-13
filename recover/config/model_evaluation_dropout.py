@@ -1,6 +1,6 @@
 from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
 from recover.models.models import Baseline
-from recover.models.predictors import AdvancedBayesianBilinearMLPPredictor
+from recover.models.predictors import AdvancedBayesianBilinearMLPPredictor, simpleBayesianBilinearMLPPredictor
 from recover.utils.utils import get_project_root
 from recover.train import train_epoch_bayesian,  BayesianBasicTrainer,\
 eval_epoch, BasicTrainer

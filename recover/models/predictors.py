@@ -214,137 +214,61 @@ class BayesianLinearModule(nn.Linear):
         # Calculate the Kullback-Leibler divergence loss
         return self.log_variational_posterior - self.log_prior
 
-# class BayesianLineardropoutModule(nn.Linear): 
-#     def __init__(self, in_features, out_features, input_dropout=0.8, hidden_dropout=0.5):
-#         super().__init__(in_features, out_features) #BayesianLinearModule, self
-#         self.in_features = in_features
-#         self.out_features = out_features
-#         self.input_dropout = input_dropout
-#         self.hidden_dropout = hidden_dropout
-#         # Weight parameters
-#         self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-0.2, 0.2))
-#         self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-5,-4))
-#         #self.weight = Gaussian(self.weight_mu, self.weight_rho)
-#         # Bias parameters
-#         self.bias_mu = nn.Parameter(torch.Tensor(out_features).uniform_(-0.2, 0.2))
-#         self.bias_rho = nn.Parameter(torch.Tensor(out_features).uniform_(-5,-4))
-     
-#         # Prior distributions
-#         self.weight_prior = ScaleMixtureGaussian(PI, SIGMA_1, SIGMA_2)
-#         self.bias_prior = ScaleMixtureGaussian(PI, SIGMA_1, SIGMA_2)
-#         self.log_prior = 0
-#         self.log_variational_posterior = 0
-
-#         # Dropout layers
-#         self.input_dropout_layer = nn.Dropout(p=self.input_dropout)
-#         self.hidden_dropout_layer = nn.Dropout(p=self.hidden_dropout)
-
-#     def sample_bias(self):
-#         epsilon = torch.distributions.Normal(0,1).sample(self.bias_rho.size())
-#         sigma = torch.log1p(torch.exp(self.bias_rho))
-#         return self.bias_mu + sigma * epsilon
-
-#     def sample_weight(self):
-#         epsilon = torch.distributions.Normal(0,1).sample(self.weight_rho.size())
-#         sigma = torch.log1p(torch.exp(self.weight_rho))
-#         return self.weight_mu + sigma * epsilon
-    
-#     def log_prob_bias(self, input):
-#         sigma = torch.log1p(torch.exp(self.bias_rho))
-#         return (-math.log(math.sqrt(2 * math.pi))
-#                 - torch.log(sigma)
-#                 - ((input - self.bias_mu) ** 2) / (2 * sigma ** 2)).sum()
-
-#     def log_prob_weight(self, input):
-#         sigma = torch.log1p(torch.exp(self.weight_rho))
-#         return (-math.log(math.sqrt(2 * math.pi))
-#                 - torch.log(sigma)
-#                 - ((input - self.weight_mu) ** 2) / (2 * sigma ** 2)).sum() 
-
-    
-#     def forward(self, input, sample=True):
-#         x, cell_line = input[0], input[1] #BAYESIAN ADD ON
-#         x = self.input_dropout_layer(x)
-        
-#         #new lines
-#         weight_mu = self.weight_mu
-#         weight_rho = self.weight_rho
-#         bias_mu = self.bias_mu
-#         bias_rho = self.bias_rho
-        
-#         weight = self.sample_weight()
-#         bias = self.sample_bias()
-
-
-#         if self.training and sample:
-            
-#             self.log_prior = self.weight_prior.log_prob(weight) + self.bias_prior.log_prob(bias)
-#             self.log_variational_posterior = self.log_prob_weight(weight) + self.log_prob_bias(bias)
-          
-#         else:
-#             self.log_prior, self.log_variational_posterior = torch.FloatTensor([0]), torch.FloatTensor([0])
-        
-#         # Apply hidden layer dropout
-#         x = self.hidden_dropout_layer(x)
-
-#         return [F.linear(x, weight, bias), cell_line]
-        
-    
-#     def kl_loss(self):
-#         return self.log_variational_posterior - self.log_prior
-
 #Sparse Variational Dropout(SVDO) on Bayesian Nueral Network
 class BayesianLinearDropoutModule(nn.Linear):
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features, out_features, threshold = 3, prior_mu=0, prior_sigma=0.01):
         super().__init__(in_features, out_features) 
         self.in_features = in_features
         self.out_features = out_features
-        
-        # Weight parameters
-        self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-0.2, 0.2))
-        self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-5,-4))
-        
-        # Bias parameters
-        self.bias_mu = nn.Parameter(torch.Tensor(out_features).uniform_(-0.2, 0.2))
-        self.bias_rho = nn.Parameter(torch.Tensor(out_features).uniform_(-5,-4))
+        self.threshold = threshold
 
-    def sample_bias(self):
-        epsilon = torch.distributions.Normal(0,1).sample(self.bias_rho.size())
-        sigma = torch.log1p(torch.exp(self.bias_rho))
-        return self.bias_mu + sigma * epsilon
+        self.W_mu = Parameter(torch.Tensor(out_features, in_features).normal_(mean=prior_mu, std=prior_sigma))
+        self.W_rho = Parameter(torch.Tensor(out_features, in_features).uniform_(-5, -4))  # Initialize rho
+        self.bias_mu = Parameter(torch.Tensor(out_features).normal_(mean=prior_mu, std=prior_sigma))
+        self.bias_rho = Parameter(torch.Tensor(out_features).uniform_(-5, -4))  # Initialize rho
+        
+    #     self.reset_parameters()
 
+    # def reset_parameters(self):
+    #     self.W_rho.data.fill_(-5)  # Reset rho to a constant value
+    #     self.bias_rho.data.fill_(-5)  # Reset rho for bias to a constant value
+        
     def sample_weight(self):
-        epsilon = torch.distributions.Normal(0,1).sample(self.weight_rho.size())
-        sigma = torch.log1p(torch.exp(self.weight_rho))
-        return self.weight_mu + sigma * epsilon
+        epsilon = torch.randn_like(self.W_mu)  # Sample random noise
+        sigma = torch.log1p(torch.exp(self.W_rho))  # Calculate sigma from rho
+        return self.W_mu + sigma * epsilon  # Return sampled weight
     
+    def sample_bias(self):
+        epsilon = torch.randn_like(self.bias_mu)  # Sample random noise
+        sigma = torch.log1p(torch.exp(self.bias_rho))  # Calculate sigma from rho
+        return self.bias_mu + sigma * epsilon  # Return sampled bias
     
-    def forward(self, input, sample=True):
-        x, cell_line = input[0], input[1] #BAYESIAN ADD ON
+    def kl_reg(self):
+        # Calculate KL divergence regularization term
+        kl = 0.5 * (self.W_rho.exp().pow(2) + self.W_mu.pow(2) - 2 * self.W_rho - 1).sum() + \
+             0.5 * (self.bias_rho.exp().pow(2) + self.bias_mu.pow(2) - 2 * self.bias_rho - 1).sum()
+        return kl
         
-        weight_mu = self.weight_mu
-        weight_rho = self.weight_rho
-        bias_mu = self.bias_mu
-        bias_rho = self.bias_rho
+    def forward(self, input):
+        x, cell_line = input[0], input[1]
         
+        # Sample weights and biases
         weight = self.sample_weight()
         bias = self.sample_bias()
-
-        # Calculate log_alpha as in SVDO
-        log_alpha = weight_rho * 2.0 - 2.0 * torch.log(1e-16 + torch.abs(weight_mu))
-        self.log_alpha = torch.clamp(log_alpha, -10, 10)
-
-        if self.training and sample:
-            return [F.linear(x, weight, bias), cell_line]
         
-        return [F.linear(x, weight* (self.log_alpha < 3).float(), bias), cell_line]
+        # Calculate log_alpha
+        log_alpha = self.W_rho * 2.0 - 2.0 * torch.log(1e-16 + torch.abs(weight))
+        log_alpha = torch.clamp(log_alpha, -10, 10) 
         
-    def kl_loss(self):
-        # k1, k2, k3 = torch.Tensor([0.63576]).cuda(), torch.Tensor([1.8732]).cuda(), torch.Tensor([1.48695]).cuda()
-        k1, k2, k3 = torch.Tensor([0.63576]), torch.Tensor([1.8732]), torch.Tensor([1.48695])
-        kl = k1 * torch.sigmoid(k2 + k3 * self.log_alpha) - 0.5 * torch.log1p(torch.exp(-self.log_alpha))
-        a = - torch.sum(kl)
-        return a
+        if self.training:
+            lrt_mean = F.linear(x, weight) + bias
+            lrt_std = torch.sqrt(F.linear(x * x, torch.exp(2 * self.W_rho)) + 1e-8)
+            eps = torch.randn_like(lrt_std)
+            return [lrt_mean + lrt_std * eps, cell_line]
+    
+        # Apply sparse variational dropout during inference
+        return [F.linear(x, weight * (log_alpha < self.threshold).float()) + bias, cell_line]
+
 ########################################################################################################################
 # Advanced Bayesian MLP
 ########################################################################################################################
@@ -365,6 +289,7 @@ class AdvancedBayesianBilinearMLPPredictor(nn.Module): #BAYESIAN ADD ON
         
         # self.layers = BayesianLinearModule(in_features, out_features)
         self.bayesian_single_prior = config["bayesian_single_prior"]
+        self.variational_dropout = config["variational_dropout"]
 
         
         assert 0 < self.merge_n_layers_before_the_end < len(predictor_layers)
@@ -504,6 +429,9 @@ class AdvancedBayesianBilinearMLPPredictor(nn.Module): #BAYESIAN ADD ON
         # return [BayesianLinearDropoutModule(dim_i, dim_i_plus_1)]
         if self.bayesian_single_prior:
             return [SimpleBayesianLinearModule(dim_i, dim_i_plus_1)]
+
+        elif self.variational_dropout:
+            return [BayesianLinearDropoutModule(dim_i, dim_i_plus_1)]
         else:
             return [BayesianLinearModule(dim_i, dim_i_plus_1)]
 
@@ -1267,4 +1195,6 @@ class simpleBayesianBilinearMLPPredictor(torch.nn.Module):
         return [LinearModule(dim_i, dim_i_plus_1)]
         
     def bayes_linear_layer(self, i, dim_i, dim_i_plus_1):
-        return [SimpleBayesianLinearModule(dim_i, dim_i_plus_1)]
+        # return [SimpleBayesianLinearModule(dim_i, dim_i_plus_1)]
+        return [BayesianLinearDropoutModule(dim_i, dim_i_plus_1)]
+        

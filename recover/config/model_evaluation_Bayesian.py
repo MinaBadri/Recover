@@ -19,6 +19,7 @@ pipeline_config = {
     "seed": tune.grid_search([2,3,4]),
     "bayesian_single_prior": False,
     "variational_dropout" : False,
+    "number_gaussian" : 5,
     "lr": 1e-4,
     "weight_decay": 1e-2,
     "batch_size": 128,

@@ -16,7 +16,7 @@ from ray import tune
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([1, 2, 3]),
+    "seed": tune.grid_search([1]), #([1, 2, 3]),
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -29,7 +29,9 @@ pipeline_config = {
 predictor_config = {
     "predictor": AdvancedBayesianBilinearMLPPredictor,
     "num_realizations": 5,
-    "bayesian_single_prior": True,
+    #Never set bayesian_single_prior and variational_dropout True at the same time
+    "bayesian_single_prior": False,  #True if one Gaussian is the prior
+    "variational_dropout" : False,   #True if we want to have a dropout in single Gaussian prior
     "predictor_layers":
         [
             2048,

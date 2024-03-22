@@ -118,9 +118,9 @@ def train_epoch_bayesian(data, loader, model, optim, config):
         # "mse": epoch_mse,
         # "loss_mse": loss_mse.item(),
         "loss_mean": epoch_loss / num_batches,
-        "loss_kl" : loss_kl / num_batches,
+        # "loss_kl" : loss_kl.item() / num_batches,
         # "kl_weight": epoch_mse+kl.item(),
-        # "loss_kl": kl.item() * kl_weight,
+        "loss_kl-2nd": kl.item() * kl_weight,
     }
 
     print("Training", summary_dict)

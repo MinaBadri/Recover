@@ -1,6 +1,6 @@
 from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
 from recover.models.models import Baseline
-from recover.models.predictors import AdvancedBayesianBilinearMLPPredictor, simpleBayesianBilinearMLPPredictor
+from recover.models.predictors import AdvancedBayesianBilinearMLPPredictor
 from recover.utils.utils import get_project_root
 from recover.train import train_epoch_bayesian,  BayesianBasicTrainer,\
 eval_epoch, BasicTrainer
@@ -16,10 +16,11 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([2,3,4]),
+    "seed": tune.grid_search([2]), #([2,3,4]),
     "bayesian_single_prior": False,
-    "variational_dropout" : True,
-    "Laplace_prior" : False,
+    "variational_dropout" : False,
+    "Laplace_prior" : True,
+    "number_gaussian" : 5,
     "lr": 1e-4,
     "weight_decay": 1e-2,
     "batch_size": 128,

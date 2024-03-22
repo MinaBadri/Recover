@@ -18,6 +18,7 @@ pipeline_config = {
     "seed": tune.grid_search([1, 2, 3, 42]),
     "bayesian_single_prior": True,
     "variational_dropout" : False,
+    "Laplace_prior" : False,
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,

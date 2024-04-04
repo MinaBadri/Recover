@@ -73,6 +73,8 @@ def train_epoch_bayesian(data, loader, model, optim, config):
     all_mean_preds = []
     all_targets = []
 
+
+
     for _, drug_drug_batch in enumerate(loader):
         optim.zero_grad()
         out = model.forward(data, drug_drug_batch)
@@ -84,12 +86,12 @@ def train_epoch_bayesian(data, loader, model, optim, config):
         loss_mse = model.loss(out, drug_drug_batch)
 
         if bayesian_single_prior:
-            kl_loss_default = bnn.BKLLoss(reduction='mean', last_layer_only=False) 
-            kl = kl_loss_default(model)
+            kl_loss = bnn.BKLLoss(reduction='mean', last_layer_only=False) 
+            kl = kl_loss(model)
     
         else:
-            kl_loss_value = model.kl_loss()
-            kl = kl_loss_value
+            kl_loss = model.kl_loss()
+            kl = kl_loss
 
         kl_weight = pow(2, num_batches-batch)/(pow(2, num_batches)-1)
 
@@ -120,7 +122,7 @@ def train_epoch_bayesian(data, loader, model, optim, config):
         "loss_mean": epoch_loss / num_batches,
         # "loss_kl" : loss_kl.item() / num_batches,
         # "kl_weight": epoch_mse+kl.item(),
-        "loss_kl-2nd": kl.item() * kl_weight,
+        "loss_kl": loss_kl.item()
     }
 
     print("Training", summary_dict)

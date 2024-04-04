@@ -16,7 +16,7 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([2]), #([2,3,4]),
+    "seed": tune.grid_search([2,3,4]),
     "bayesian_single_prior": False,
     "variational_dropout" : False,
     "Laplace_prior" : False,

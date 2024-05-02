@@ -18,6 +18,9 @@ pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
     "seed": tune.grid_search([3]),
+    "bayesian_single_prior": False,
+    "variational_dropout" : False,
+    "Laplace_prior" : True,
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -83,6 +86,7 @@ configuration = {
     "checkpoint_at_end": False,
     "checkpoint_freq": 1,
     "resources_per_trial": {"cpu": 8, "gpu": 1},
+    "bayesian_single_prior": False,
     "scheduler": None,
     "search_alg": None,
 }

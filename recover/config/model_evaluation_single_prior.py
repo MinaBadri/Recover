@@ -1,6 +1,6 @@
 from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
 from recover.models.models import Baseline
-from recover.models.predictors import BilinearFilmMLPPredictor, simpleBayesianBilinearMLPPredictor, MLPPredictor
+from recover.models.predictors import BilinearFilmMLPPredictor, AdvancedBayesianBilinearMLPPredictor, MLPPredictor
 from recover.utils.utils import get_project_root
 from recover.train import train_epoch, eval_epoch, BasicTrainer, BayesianBasicTrainer, train_epoch_bayesian
 import os
@@ -29,7 +29,7 @@ pipeline_config = {
 }
 
 predictor_config = {
-    "predictor": simpleBayesianBilinearMLPPredictor,
+    "predictor": AdvancedBayesianBilinearMLPPredictor,
     # "num_realizations": 10, # For bayesian uncertainty
     "predictor_layers":
         [

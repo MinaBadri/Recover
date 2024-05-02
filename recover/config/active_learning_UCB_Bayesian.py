@@ -16,7 +16,7 @@ from ray import tune
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([1, 2, 3]),
+    "seed": tune.grid_search([2]), # ([1, 2, 3]),
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -45,7 +45,7 @@ predictor_config = {
 }
 
 model_config = {
-    "model": Baseline,
+    "model": EnsembleModel,
     # Loading pretrained model
     "load_model_weights": False,  # tune.grid_search([True, False]),
     "model_weights_file": "",
@@ -79,7 +79,7 @@ dataset_config = {
 
 active_learning_config = {
     "ensemble_size": 5,
-    "acquisition": tune.grid_search([UCB, RandomAcquisition, ProbabilityOfImprovementAcquisition, ExpectedImprovementAcquisition]), #ProbabilityOfImprovementAcquisition, UCB, ExpectedImprovementAcquisition]), #([GreedyAcquisition, UCB, RandomAcquisition]),
+    "acquisition": tune.grid_search([UCB]), #([UCB, RandomAcquisition, ProbabilityOfImprovementAcquisition, ExpectedImprovementAcquisition]), 
     "patience_max": 4,
     "kappa": 1,
     "kappa_decrease_factor": 1,

@@ -17,7 +17,10 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([2,3]), #([2, 3, 4]),
+    "seed": tune.grid_search([3]), #([2, 3, 4]),
+    "bayesian_single_prior": False,
+    "variational_dropout" : False,
+    "Laplace_prior" : True,
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -84,5 +87,6 @@ configuration = {
     "checkpoint_freq": 1,
     "resources_per_trial": {"cpu": 8, "gpu": 0},
     "scheduler": None,
+    "bayesian_single_prior": False,
     "search_alg": None,
 }

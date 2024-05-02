@@ -366,6 +366,8 @@ class BayesianLinearDropoutModule(nn.Linear):
         self.W_rho = Parameter(torch.Tensor(out_features, in_features).uniform_(-5, -4))  # Initialize rho
         self.bias_mu = Parameter(torch.Tensor(out_features).normal_(mean=prior_mu, std=prior_sigma))
         self.bias_rho = Parameter(torch.Tensor(out_features).uniform_(-5, -4))  # Initialize rho
+
+        self.log_alpha = None
         
     #     self.reset_parameters()
 
@@ -382,12 +384,6 @@ class BayesianLinearDropoutModule(nn.Linear):
         epsilon = torch.randn_like(self.bias_mu)  # Sample random noise
         sigma = torch.log1p(torch.exp(self.bias_rho))  # Calculate sigma from rho
         return self.bias_mu + sigma * epsilon  # Return sampled bias
-    
-    def kl_loss(self):
-        # Calculate KL divergence regularization term
-        kl = 0.5 * (self.W_rho.exp().pow(2) + self.W_mu.pow(2) - 2 * self.W_rho - 1).sum() + \
-             0.5 * (self.bias_rho.exp().pow(2) + self.bias_mu.pow(2) - 2 * self.bias_rho - 1).sum()
-        return kl
         
     def forward(self, input):
         x, cell_line = input[0], input[1]
@@ -399,6 +395,7 @@ class BayesianLinearDropoutModule(nn.Linear):
         # Calculate log_alpha
         log_alpha = self.W_rho * 2.0 - 2.0 * torch.log(1e-16 + torch.abs(weight))
         log_alpha = torch.clamp(log_alpha, -10, 10) 
+        self.log_alpha = log_alpha
         
         if self.training:
             lrt_mean = F.linear(x, weight) + bias
@@ -408,7 +405,13 @@ class BayesianLinearDropoutModule(nn.Linear):
     
         # Apply sparse variational dropout during inference
         return [F.linear(x, weight * (log_alpha < self.threshold).float()) + bias, cell_line]
-
+    
+    def kl_loss(self):
+        # Calculate KL divergence regularization term
+        kl_weight_bias = 0.5 * (self.W_rho.exp().pow(2) + self.W_mu.pow(2) - 2 * self.W_rho - 1).sum() + \
+             0.5 * (self.bias_rho.exp().pow(2) + self.bias_mu.pow(2) - 2 * self.bias_rho - 1).sum()
+        kl_dropout = -torch.sum(F.softplus(-self.log_alpha))
+        return kl_weight_bias + kl_dropout
 
 class LaplacePrior(object):
     def __init__(self, scale):

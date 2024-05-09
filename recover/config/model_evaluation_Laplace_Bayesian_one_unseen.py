@@ -1,4 +1,4 @@
-from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
+from recover.datasets.drugcomb_matrix_data import DrugCombMatrix, DrugCombMatrixOneHiddenDrugSplitTrain
 from recover.models.models import Baseline
 from recover.models.predictors import AdvancedBayesianBilinearMLPPredictor
 from recover.utils.utils import get_project_root
@@ -16,10 +16,10 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([4]), #([2,3,4]),
+    "seed": tune.grid_search([2,3,4]),
     "bayesian_single_prior": False,
     "variational_dropout" : False,
-    "Laplace_prior" : False,
+    "Laplace_prior" : True,
     "number_gaussian" : 5,
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -50,12 +50,12 @@ model_config = {
 }
 
 dataset_config = {
-    "dataset": DrugCombMatrix,
+    "dataset": DrugCombMatrixOneHiddenDrugSplitTrain,
     "study_name": 'ALMANAC',
     "in_house_data": 'without',
     "rounds_to_include": [],
     "val_set_prop": 0.2,
-    "test_set_prop": 0.1,
+    "test_set_prop": 0.0,
     "test_on_unseen_cell_line": False,
     "split_valid_train": "pair_level",
     "cell_line": 'MCF7',  # 'PC-3',

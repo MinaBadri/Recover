@@ -45,7 +45,7 @@ predictor_config = {
 }
 
 model_config = {
-    "model": EnsembleModel,
+    "model": Baseline,
     # Loading pretrained model
     "load_model_weights": False,  # tune.grid_search([True, False]),
     "model_weights_file": "",

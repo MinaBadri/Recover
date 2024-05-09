@@ -1,10 +1,10 @@
 from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
 from recover.models.models import Baseline, EnsembleModel
 from recover.models.predictors import BilinearFilmMLPPredictor, \
-    BilinearMLPPredictor, BilinearFilmWithFeatMLPPredictor, BilinearCellLineInputMLPPredictor
+    BilinearMLPPredictor, BilinearFilmWithFeatMLPPredictor
 from recover.utils.utils import get_project_root
 from recover.acquisition.acquisition import RandomAcquisition, GreedyAcquisition, UCB
-from recover.train import train_epoch, eval_epoch, BasicTrainer, ActiveTrainer
+from recover.train import train_epoch, eval_epoch, BasicTrainer, RecoverActiveTrainer
 import os
 from ray import tune
 
@@ -74,7 +74,7 @@ dataset_config = {
 
 active_learning_config = {
     "ensemble_size": 5,
-    "acquisition": tune.grid_search([UCB]), #([GreedyAcquisition, UCB, RandomAcquisition]),
+    "acquisition": tune.grid_search([GreedyAcquisition, UCB]), #RandomAcquisition]),
     "patience_max": 4,
     "kappa": 1,
     "kappa_decrease_factor": 1,
@@ -88,7 +88,7 @@ active_learning_config = {
 ########################################################################################################################
 
 configuration = {
-    "trainer": ActiveTrainer,  # PUT NUM GPU BACK TO 1
+    "trainer": RecoverActiveTrainer,  # PUT NUM GPU BACK TO 1
     "trainer_config": {
         **pipeline_config,
         **predictor_config,
@@ -98,7 +98,7 @@ configuration = {
     },
     "summaries_dir": os.path.join(get_project_root(), "RayLogs"),
     "memory": 1800,
-    "stop": {"training_iteration": 2, 'all_space_explored': 1},
+    "stop": {"training_iteration": 1000, 'all_space_explored': 1},
     "checkpoint_score_attr": 'eval/comb_r_squared',
     "keep_checkpoints_num": 1,
     "checkpoint_at_end": False,

@@ -4,7 +4,7 @@ from recover.models.predictors import BilinearFilmMLPPredictor, BilinearMLPPredi
 AdvancedBayesianBilinearMLPPredictor
 from recover.utils.utils import get_project_root
 from recover.train import train_epoch_bayesian,  BayesianBasicTrainer,\
-eval_epoch, BasicTrainer
+eval_epoch, BasicTrainer, train_epoch
 import os
 from ray import tune
 from importlib import import_module

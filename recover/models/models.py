@@ -66,6 +66,7 @@ class EnsembleModel(torch.nn.Module):
 
         self.models = torch.nn.ModuleList(models)
 
+
     def forward(self, data, drug_drug_batch):
         comb_list = []
         for model_i in self.models:
@@ -82,6 +83,12 @@ class EnsembleModel(torch.nn.Module):
 
         loss /= self.ensemble_size
         return loss
+
+    def kl_loss(self):
+        total_kl_loss = 0
+        for model in self.models:
+            total_kl_loss += model.kl_loss()
+        return total_kl_loss / self.ensemble_size
 
 
 class PredictiveUncertaintyModel(torch.nn.Module):

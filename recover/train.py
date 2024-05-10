@@ -90,7 +90,7 @@ def train_epoch_bayesian(data, loader, model, optim, config):
     
         else:
             kl_loss = model.kl_loss()
-            kl = kl_loss
+            kl = kl_loss / num_batches
 
         kl_weight = pow(2, num_batches-batch)/(pow(2, num_batches)-1)
 
@@ -121,7 +121,7 @@ def train_epoch_bayesian(data, loader, model, optim, config):
         "loss_mean": epoch_loss / num_batches,
         # "loss_kl" : loss_kl.item() / num_batches,
         # "kl_weight": epoch_mse+kl.item(),
-        "loss_kl": loss_kl.item()
+        "loss_kl": loss_kl.item() 
     }
 
     print("Training", summary_dict)

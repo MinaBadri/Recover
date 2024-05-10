@@ -5,6 +5,7 @@ import torchbnn as bnn
 from torch.nn import Parameter
 import math
 import torch.nn.functional as F
+from torch.autograd import Variable
 ########################################################################################################################
 # Modules
 ########################################################################################################################
@@ -124,23 +125,21 @@ class ScaleMixtureGaussian(object): #scale mixture Gaussian
         
         self.gaussian1 = torch.distributions.Normal(0,sigma1)
         self.gaussian2 = torch.distributions.Normal(0,sigma2)
-        # self.gaussians = [torch.distributions.Normal (0, sigma) for sigma in sigmas]
     
     def log_prob(self, input):
         prob1 = torch.exp(self.gaussian1.log_prob(input))
+        prob1 = torch.clamp(prob1, 1e-10, 1. )
+
         prob2 = torch.exp(self.gaussian2.log_prob(input))
+        prob2 = torch.clamp(prob2, 1e-10, 1. )
         
-        # Normalize probabilities
-        total_prob = self.pi * prob1 + (1 - self.pi) * prob2
-        normalized_prob1 = self.pi * prob1 / total_prob
-        normalized_prob2 = (1 - self.pi) * prob2 / total_prob
 
         # Calculate log probability and sum
-        log_prob = torch.log(normalized_prob1 + normalized_prob2)
+        log_prob = torch.log(prob1 + prob2)
         
 
         if self.pi == 1:
-            return torch.log(normalized_prob1).sum()
+            return torch.log(prob1).sum()
         # return (torch.log(self.pi * prob1 + (1-self.pi) * prob2)).sum()
         return log_prob.sum()
     
@@ -157,19 +156,14 @@ class BayesianLinearModule(nn.Linear):
         self.out_features = out_features
 
         # Weight parameters
-        self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-0.2, 0.2))
-        self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-5,-4))
+        self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features).normal_(0., .05))
+        self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).normal_(0., .05))
         #self.weight = Gaussian(self.weight_mu, self.weight_rho)
 
         # Bias parameters
-        self.bias_mu = nn.Parameter(torch.Tensor(out_features).uniform_(-0.2, 0.2))
-        self.bias_rho = nn.Parameter(torch.Tensor(out_features).uniform_(-5,-4))
+        self.bias_mu = nn.Parameter(torch.Tensor(out_features).normal_(0., .05))
+        self.bias_rho = nn.Parameter(torch.Tensor(out_features).normal_(0., .05))
 
-        # self.number_gaussian = config["number_gaussian"]
-
-        # self.pi = nn.Parameter(torch.Tensor(self.number_gaussian).uniform_())
-        # self.pi.data = self.pi.data / self.pi.data.sum()
-        # self.sigmas = [torch.FloatTensor([math.exp(-i)]) for i in range(self.number_gaussian)]
      
         # Prior distributions
         self.weight_prior = ScaleMixtureGaussian(PI, SIGMA_1, SIGMA_2)
@@ -179,13 +173,13 @@ class BayesianLinearModule(nn.Linear):
 
     def sample_bias(self):
         # Sample bias using reparameterization trick
-        epsilon = torch.distributions.Normal(0,1).sample(self.bias_rho.size())
+        epsilon = Variable(torch.distributions.Normal(0,1).sample(self.bias_rho.size()))
         sigma = torch.log1p(torch.exp(self.bias_rho))
         return self.bias_mu + sigma * epsilon
 
     def sample_weight(self):
         # Sample weight using reparameterization trick
-        epsilon = torch.distributions.Normal(0,1).sample(self.weight_rho.size())
+        epsilon = Variable(torch.distributions.Normal(0,1).sample(self.weight_rho.size()))
         sigma = torch.log1p(torch.exp(self.weight_rho))
         return self.weight_mu + sigma * epsilon
     
@@ -209,11 +203,6 @@ class BayesianLinearModule(nn.Linear):
     def forward(self, input, sample=True):
         x, cell_line = input[0], input[1] #BAYESIAN ADD ON
         
-        # Sample weights and biases
-        # weight_mu = self.weight_mu
-        # weight_rho = self.weight_rho
-        # bias_mu = self.bias_mu
-        # bias_rho = self.bias_rho
         
         weight = self.sample_weight()
         bias = self.sample_bias()

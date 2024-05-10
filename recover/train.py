@@ -187,6 +187,8 @@ class BasicTrainer(tune.Trainable):
             in_house_data=config["in_house_data"],
             rounds_to_include=config["rounds_to_include"],
         )
+        self.patience_stop = config["stop"]["patience"]
+        self.max_iter = config["stop"]["training_iteration"]
 
         self.data = dataset.data.to(self.device)
 
@@ -220,6 +222,25 @@ class BasicTrainer(tune.Trainable):
             valid_ddi_dataset,
             batch_size=config["batch_size"]
         )
+        #  # Test loader
+        # test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
+
+        # self.test_loader = DataLoader(
+        #     test_ddi_dataset,
+        #     batch_size=config["batch_size"]
+        # )
+
+         # for unseen test - DrugCombMatrixDrugLevelSplitTest - ONLY WORKS ON CPU
+        # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
+
+        dl_split_data = DrugCombMatrixDrugLevelSplitTest(cell_line='MCF7',
+                                         fp_bits=1024,
+                                         fp_radius=2)
+        
+        dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
+        self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
+        test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
+        self.test_loader = DataLoader(test_dataset, batch_size=config["batch_size"])
 
 
         # Initialize model
@@ -252,6 +273,7 @@ class BasicTrainer(tune.Trainable):
         self.max_eval_r_squared = -1
 
     def step(self):
+        num_realizations = 10
 
         train_metrics = self.train_epoch(
             self.data,
@@ -279,6 +301,36 @@ class BasicTrainer(tune.Trainable):
 
         metrics['patience'] = self.patience
         metrics['all_space_explored'] = 0
+
+        if ((self.patience >= self.patience_stop) | (self.training_it > self.max_iter)):
+            test_result = {}
+            realization_results, result_synergy = self.eval_epoch(self.data, self.test_loader, self.model)
+           
+            drug_combinations_synergy = {'data': self.test_idxs}
+            test_metrics = dict([("test/" + k, [v]) for k, v in realization_results.items()])
+            for i in range(num_realizations-1):
+                realization_results, new_synergy = self.eval_epoch(self.data, self.test_loader, self.model)
+                result_synergy = torch.cat((result_synergy, new_synergy), dim=1)
+                for k, v in realization_results.items():
+                    test_metrics["test/" + k].append(v)
+                    
+            for key in test_metrics:
+                test_result[str(key)+ "/mean"] = np.mean(test_metrics[key])
+                test_result[str(key)+ "/std"] = np.std(test_metrics[key])
+                
+            
+            synergy_mean = list(torch.mean(result_synergy, dim=1).numpy())
+            synergy_std = list(torch.std(result_synergy, dim=1).numpy())
+            
+
+            
+            metrics.update(dict(test_result)) # Add test results to output files
+            
+
+            metrics['synergy_mean'] = list(synergy_mean)
+            metrics['synergy_std'] = list(synergy_std)
+
+            print("Test Result:", test_result)
 
         return metrics
 
@@ -365,7 +417,7 @@ class BayesianBasicTrainer(tune.Trainable):
         # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
         
         
-        dl_split_data = DrugCombMatrixDrugLevelSplitTest(cell_line='MCF7',
+        dl_split_data = DrugCombMatrixOneHiddenDrugSplitTest(cell_line='MCF7',
                                          fp_bits=1024,
                                          fp_radius=2)
         
@@ -421,7 +473,6 @@ class BayesianBasicTrainer(tune.Trainable):
 
         eval_metrics, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
         
-        # eval_metrics, _ = self.bayesian_eval_epoch(self.data, self.valid_loader, self.model)
         
         train_metrics = [("train/" + k, v) for k, v in train_metrics.items()]
         eval_metrics = [("eval/" + k, v) for k, v in eval_metrics.items()]

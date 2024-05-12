@@ -72,8 +72,6 @@ def train_epoch_bayesian(data, loader, model, optim, config):
     all_mean_preds = []
     all_targets = []
 
-
-
     for _, drug_drug_batch in enumerate(loader):
         optim.zero_grad()
         out = model.forward(data, drug_drug_batch)
@@ -99,6 +97,7 @@ def train_epoch_bayesian(data, loader, model, optim, config):
 
         cost.backward()
         optim.step()
+
         epoch_loss += loss_mse.item()
         loss_kl += kl * kl_weight
 
@@ -222,25 +221,25 @@ class BasicTrainer(tune.Trainable):
             valid_ddi_dataset,
             batch_size=config["batch_size"]
         )
-        #  # Test loader
-        # test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
+         # Test loader
+        test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
 
-        # self.test_loader = DataLoader(
-        #     test_ddi_dataset,
-        #     batch_size=config["batch_size"]
-        # )
+        self.test_loader = DataLoader(
+            test_ddi_dataset,
+            batch_size=config["batch_size"]
+        )
 
          # for unseen test - DrugCombMatrixDrugLevelSplitTest - ONLY WORKS ON CPU
         # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
 
-        dl_split_data = DrugCombMatrixDrugLevelSplitTest(cell_line='MCF7',
-                                         fp_bits=1024,
-                                         fp_radius=2)
+        # dl_split_data = DrugCombMatrixDrugLevelSplitTest(cell_line='MCF7',
+        #                                  fp_bits=1024,
+        #                                  fp_radius=2)
         
-        dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
-        self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
-        test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
-        self.test_loader = DataLoader(test_dataset, batch_size=config["batch_size"])
+        # dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
+        # self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
+        # test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
+        # self.test_loader = DataLoader(test_dataset, batch_size=config["batch_size"])
 
 
         # Initialize model
@@ -406,25 +405,25 @@ class BayesianBasicTrainer(tune.Trainable):
         )
         
         # Test loader
-        # test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
+        test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
 
-        # self.test_loader = DataLoader(
-        #     test_ddi_dataset,
-        #     batch_size=config["batch_size"]
-        # )
+        self.test_loader = DataLoader(
+            test_ddi_dataset,
+            batch_size=config["batch_size"]
+        )
 
         # for unseen test - DrugCombMatrixDrugLevelSplitTest - ONLY WORKS ON CPU
         # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
         
         
-        dl_split_data = DrugCombMatrixOneHiddenDrugSplitTest(cell_line='MCF7',
-                                         fp_bits=1024,
-                                         fp_radius=2)
+        # dl_split_data = DrugCombMatrixOneHiddenDrugSplitTest(cell_line='MCF7',
+        #                                  fp_bits=1024,
+        #                                  fp_radius=2)
         
-        dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
-        self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
-        test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
-        self.test_loader = DataLoader(test_dataset, batch_size=128)
+        # dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
+        # self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
+        # test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
+        # self.test_loader = DataLoader(test_dataset, batch_size=128)
 
 
         # Initialize model
@@ -460,9 +459,7 @@ class BayesianBasicTrainer(tune.Trainable):
         self.max_eval_r_squared = -1
 
     def step(self):
-    
-        num_realizations = 10
-
+        num_realizations = 5
         train_metrics = self.train_epoch(
             self.data,
             self.train_loader,
@@ -490,13 +487,13 @@ class BayesianBasicTrainer(tune.Trainable):
             self.patience += 1
             
         metrics['patience'] = self.patience
-        metrics['all_space_explored'] = 0                        
+        metrics['all_space_explored'] = 0                       
 
 
         if ((self.patience >= self.patience_stop) | (self.training_it > self.max_iter)):
             test_result = {}
             realization_results, result_synergy = self.eval_epoch(self.data, self.test_loader, self.model)
-           
+
             drug_combinations_synergy = {'data': self.test_idxs}
             test_metrics = dict([("test/" + k, [v]) for k, v in realization_results.items()])
             for i in range(num_realizations-1):
@@ -751,7 +748,7 @@ class ActiveTrainer(BasicTrainer):
         self.acquire_n_at_a_time = config["acquire_n_at_a_time"]
         self.acquisition = config["acquisition"](config)
         self.n_epoch_between_queries = config["n_epoch_between_queries"]
-        # self.num_realizations = config["num_realizations"]
+        self.num_realizations = config["num_realizations"]
 
         device_type = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device_type)
@@ -786,26 +783,42 @@ class ActiveTrainer(BasicTrainer):
         else:
             seen_metrics = {}
 
-                # Evaluate on valid set
+        # Evaluate on valid set
         eval_metrics, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
         
+#######################################################
+        unseen_metrics = {}
+        realization_results, unseen_preds = self.eval_epoch(self.data, self.unseen_loader, self.model)
+        unseen_result = dict([("unseen/" + k, [v]) for k, v in realization_results.items()])
         
+        for i in range(self.num_realizations - 1):
+            realization_results, result_tensor = self.eval_epoch(self.data, self.unseen_loader, self.model)
+            unseen_preds = torch.cat((unseen_preds, result_tensor), dim=1)
+            for k, v in realization_results.items():
+                unseen_result["unseen/" + k].append(v)
+                
+        for key in unseen_result:
+            unseen_metrics[str(key)+ "/mean"] = np.mean(unseen_result[key])
+            unseen_metrics[str(key)+ "/std"] = np.var(unseen_result[key])
+
         # Score unseen examples
-        unseen_metrics, unseen_preds = self.eval_epoch(self.data, self.unseen_loader, self.model)
+        # unseen_metrics, unseen_preds = self.eval_epoch(self.data, self.unseen_loader, self.model)
         
 
         active_scores = self.acquisition.get_scores(unseen_preds)
 
         # Build summary
         seen_metrics = [("seen/" + k, v) for k, v in seen_metrics.items()]
-        unseen_metrics = [("unseen/" + k, v) for k, v in unseen_metrics.items()]
+        # unseen_metrics = [("unseen/" + k, v) for k, v in unseen_metrics.items()]
         eval_metrics = [("eval/" + k, v) for k, v in eval_metrics.items()]
 
         metrics = dict(
             seen_metrics
-            + unseen_metrics
+            # + unseen_metrics
             + eval_metrics
         )
+
+        metrics.update(dict(unseen_metrics))
 
         # Acquire new data
         print("query data")

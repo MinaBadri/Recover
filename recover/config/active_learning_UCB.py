@@ -37,6 +37,7 @@ predictor_config = {
         ],
     "merge_n_layers_before_the_end": 2,  # Computation on the sum of the two drug embeddings for the last n layers
     "allow_neg_eigval": True,
+    "stop": {"training_iteration": 1000, 'patience': 4}
 }
 
 model_config = {
@@ -74,7 +75,7 @@ dataset_config = {
 
 active_learning_config = {
     "ensemble_size": 5,
-    "acquisition": tune.grid_search([GreedyAcquisition, UCB]), #RandomAcquisition]),
+    "acquisition": tune.grid_search([RandomAcquisition]), #RandomAcquisition]),UCB, GreedyAcquisition
     "patience_max": 4,
     "kappa": 1,
     "kappa_decrease_factor": 1,

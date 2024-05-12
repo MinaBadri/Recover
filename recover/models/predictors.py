@@ -615,13 +615,7 @@ class AdvancedBayesianBilinearMLPPredictor(nn.Module): #BAYESIAN ADD ON
         return layers
 
     def add_bayesian_layer(self, layers, i, dim_i, dim_i_plus_1):
-
-        # Add a Bayesian layer to the list of layers
-        # layers.extend(self.bayesian_linear_layer(i, mu, sigma, dim_i, dim_i_plus_1))
-        # bayesian_linear_layer = [BayesianLinearModule(dim_i, dim_i_plus_1)]
-        
         layers.extend(self.bayesian_linear_layer(i, dim_i, dim_i_plus_1))
-        
         
         if i != len(self.layer_dims) - 2:
             layers.append(ReLUModule())
@@ -645,8 +639,6 @@ class AdvancedBayesianBilinearMLPPredictor(nn.Module): #BAYESIAN ADD ON
         else:
             return [BayesianLinearModule(dim_i, dim_i_plus_1)]
             
-        
-
     def linear_layer(self, i, dim_i, dim_i_plus_1):
         # Return a linear layer
         return [LinearModule(dim_i, dim_i_plus_1)]

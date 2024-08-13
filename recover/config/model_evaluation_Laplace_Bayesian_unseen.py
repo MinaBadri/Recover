@@ -1,6 +1,6 @@
-from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
+from recover.datasets.drugcomb_matrix_data import DrugCombMatrixDrugLevelSplitTrain
 from recover.models.models import Baseline
-from recover.models.predictors import AdvancedBayesianBilinearMLPPredictor, simpleBayesianBilinearMLPPredictor
+from recover.models.predictors import AdvancedBayesianBilinearMLPPredictor
 from recover.utils.utils import get_project_root
 from recover.train import train_epoch_bayesian,  BayesianBasicTrainer,\
 eval_epoch, BasicTrainer
@@ -18,8 +18,9 @@ pipeline_config = {
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
     "seed": tune.grid_search([2,3,4]),
     "bayesian_single_prior": False,
-    "variational_dropout" : True,
-    "Laplace_prior" : False,
+    "variational_dropout" : False,
+    "Laplace_prior" : True,
+    "number_gaussian" : 5,
     "lr": 1e-4,
     "weight_decay": 1e-2,
     "batch_size": 128,
@@ -49,12 +50,12 @@ model_config = {
 }
 
 dataset_config = {
-    "dataset": DrugCombMatrix,
+    "dataset": DrugCombMatrixDrugLevelSplitTrain,
     "study_name": 'ALMANAC',
     "in_house_data": 'without',
     "rounds_to_include": [],
     "val_set_prop": 0.2,
-    "test_set_prop": 0.1,
+    "test_set_prop": 0.0,
     "test_on_unseen_cell_line": False,
     "split_valid_train": "pair_level",
     "cell_line": 'MCF7',  # 'PC-3',

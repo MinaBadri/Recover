@@ -1,4 +1,4 @@
-from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
+from recover.datasets.drugcomb_matrix_data import DrugCombMatrixOneHiddenDrugSplitTrain
 from recover.models.models import Baseline
 from recover.models.predictors import AdvancedBayesianBilinearMLPPredictor, simpleBayesianBilinearMLPPredictor
 from recover.utils.utils import get_project_root
@@ -49,12 +49,12 @@ model_config = {
 }
 
 dataset_config = {
-    "dataset": DrugCombMatrix,
+    "dataset": DrugCombMatrixOneHiddenDrugSplitTrain,
     "study_name": 'ALMANAC',
     "in_house_data": 'without',
     "rounds_to_include": [],
     "val_set_prop": 0.2,
-    "test_set_prop": 0.1,
+    "test_set_prop": 0.0,
     "test_on_unseen_cell_line": False,
     "split_valid_train": "pair_level",
     "cell_line": 'MCF7',  # 'PC-3',

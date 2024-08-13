@@ -14,8 +14,7 @@ import importlib
 from scipy import stats
 from scipy.stats import spearmanr
 import torch.nn.functional as F
-
-
+from recover.datasets.drugcomb_matrix_data import DrugCombMatrixDrugLevelSplitTest, DrugCombMatrixOneHiddenDrugSplitTest
 ########################################################################################################################
 # Epoch loops
 ########################################################################################################################
@@ -85,12 +84,12 @@ def train_epoch_bayesian(data, loader, model, optim, config):
         loss_mse = model.loss(out, drug_drug_batch)
 
         if bayesian_single_prior:
-            kl_loss_default = bnn.BKLLoss(reduction='mean', last_layer_only=False) 
-            kl = kl_loss_default(model)
+            kl_loss = bnn.BKLLoss(reduction='mean', last_layer_only=False) 
+            kl = kl_loss(model)
     
         else:
-            kl_loss_value = model.kl_loss()
-            kl = kl_loss_value
+            kl_loss = model.kl_loss()
+            kl = kl_loss / num_batches
 
         kl_weight = pow(2, num_batches-batch)/(pow(2, num_batches)-1)
 
@@ -99,6 +98,7 @@ def train_epoch_bayesian(data, loader, model, optim, config):
 
         cost.backward()
         optim.step()
+
         epoch_loss += loss_mse.item()
         loss_kl += kl * kl_weight
 
@@ -119,9 +119,9 @@ def train_epoch_bayesian(data, loader, model, optim, config):
         # "mse": epoch_mse,
         # "loss_mse": loss_mse.item(),
         "loss_mean": epoch_loss / num_batches,
-        "loss_kl" : loss_kl / num_batches,
+        # "loss_kl" : loss_kl.item() / num_batches,
         # "kl_weight": epoch_mse+kl.item(),
-        # "loss_kl": kl.item() * kl_weight,
+        "loss_kl": loss_kl.item() 
     }
 
     print("Training", summary_dict)
@@ -187,6 +187,8 @@ class BasicTrainer(tune.Trainable):
             in_house_data=config["in_house_data"],
             rounds_to_include=config["rounds_to_include"],
         )
+        self.patience_stop = config["stop"]["patience"]
+        self.max_iter = config["stop"]["training_iteration"]
 
         self.data = dataset.data.to(self.device)
 
@@ -220,6 +222,25 @@ class BasicTrainer(tune.Trainable):
             valid_ddi_dataset,
             batch_size=config["batch_size"]
         )
+         # Test loader
+        test_ddi_dataset = get_tensor_dataset(self.data, self.test_idxs)
+
+        self.test_loader = DataLoader(
+            test_ddi_dataset,
+            batch_size=config["batch_size"]
+        )
+
+         # for unseen test - DrugCombMatrixDrugLevelSplitTest - ONLY WORKS ON CPU
+        # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
+
+        # dl_split_data = DrugCombMatrixDrugLevelSplitTest(cell_line='MCF7',
+        #                                  fp_bits=1024,
+        #                                  fp_radius=2)
+        
+        # dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
+        # self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
+        # test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
+        # self.test_loader = DataLoader(test_dataset, batch_size=config["batch_size"])
 
 
         # Initialize model
@@ -252,13 +273,14 @@ class BasicTrainer(tune.Trainable):
         self.max_eval_r_squared = -1
 
     def step(self):
+        num_realizations = 10
 
         train_metrics = self.train_epoch(
             self.data,
             self.train_loader,
             self.model,
             self.optim,
-            self.config
+            # self.config
         )
 
         eval_metrics, _= self.eval_epoch(self.data, self.valid_loader, self.model)
@@ -279,6 +301,36 @@ class BasicTrainer(tune.Trainable):
 
         metrics['patience'] = self.patience
         metrics['all_space_explored'] = 0
+
+        if ((self.patience >= self.patience_stop) | (self.training_it > self.max_iter)):
+            test_result = {}
+            realization_results, result_synergy = self.eval_epoch(self.data, self.test_loader, self.model)
+           
+            drug_combinations_synergy = {'data': self.test_idxs}
+            test_metrics = dict([("test/" + k, [v]) for k, v in realization_results.items()])
+            for i in range(num_realizations-1):
+                realization_results, new_synergy = self.eval_epoch(self.data, self.test_loader, self.model)
+                result_synergy = torch.cat((result_synergy, new_synergy), dim=1)
+                for k, v in realization_results.items():
+                    test_metrics["test/" + k].append(v)
+                    
+            for key in test_metrics:
+                test_result[str(key)+ "/mean"] = np.mean(test_metrics[key])
+                test_result[str(key)+ "/std"] = np.std(test_metrics[key])
+                
+            
+            synergy_mean = list(torch.mean(result_synergy, dim=1).numpy())
+            synergy_std = list(torch.std(result_synergy, dim=1).numpy())
+            
+
+            
+            metrics.update(dict(test_result)) # Add test results to output files
+            
+
+            metrics['synergy_mean'] = list(synergy_mean)
+            metrics['synergy_std'] = list(synergy_std)
+
+            print("Test Result:", test_result)
 
         return metrics
 
@@ -301,8 +353,10 @@ class BayesianBasicTrainer(tune.Trainable):
 
         self.batch_size = config["batch_size"]
         self.bayesian_single_prior = config["bayesian_single_prior"]
+
         self.variational_dropout = config["variational_dropout"]
         
+
 
         device_type = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device_type)
@@ -316,6 +370,7 @@ class BayesianBasicTrainer(tune.Trainable):
             study_name=config["study_name"],
             in_house_data=config["in_house_data"],
             rounds_to_include=config["rounds_to_include"],
+            
         )
         
         self.patience_stop = config["stop"]["patience"]
@@ -362,6 +417,19 @@ class BayesianBasicTrainer(tune.Trainable):
             batch_size=config["batch_size"]
         )
 
+        # for unseen test - DrugCombMatrixDrugLevelSplitTest - ONLY WORKS ON CPU
+        # for one-unseen test - DrugCombMatrixOneHiddenDrugSplitTest - ONLY WORKS ON CPU
+        
+        
+        # dl_split_data = DrugCombMatrixOneHiddenDrugSplitTest(cell_line='MCF7',
+        #                                  fp_bits=1024,
+        #                                  fp_radius=2)
+        
+        # dl_split_data.data.ddi_edge_response = dl_split_data.data.ddi_edge_bliss_max
+        # self.test_idxs = range(len(dl_split_data.data.ddi_edge_response))
+        # test_dataset = get_tensor_dataset(dl_split_data.data, self.test_idxs)
+        # self.test_loader = DataLoader(test_dataset, batch_size=128)
+
 
         # Initialize model
         self.model = config["model"](self.data, config)
@@ -396,9 +464,7 @@ class BayesianBasicTrainer(tune.Trainable):
         self.max_eval_r_squared = -1
 
     def step(self):
-    
-        num_realizations = 10
-
+        num_realizations = 5
         train_metrics = self.train_epoch(
             self.data,
             self.train_loader,
@@ -409,7 +475,6 @@ class BayesianBasicTrainer(tune.Trainable):
 
         eval_metrics, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
         
-        # eval_metrics, _ = self.bayesian_eval_epoch(self.data, self.valid_loader, self.model)
         
         train_metrics = [("train/" + k, v) for k, v in train_metrics.items()]
         eval_metrics = [("eval/" + k, v) for k, v in eval_metrics.items()]
@@ -427,13 +492,13 @@ class BayesianBasicTrainer(tune.Trainable):
             self.patience += 1
             
         metrics['patience'] = self.patience
-        metrics['all_space_explored'] = 0                        
+        metrics['all_space_explored'] = 0                       
 
 
         if ((self.patience >= self.patience_stop) | (self.training_it > self.max_iter)):
             test_result = {}
             realization_results, result_synergy = self.eval_epoch(self.data, self.test_loader, self.model)
-           
+
             drug_combinations_synergy = {'data': self.test_idxs}
             test_metrics = dict([("test/" + k, [v]) for k, v in realization_results.items()])
             for i in range(num_realizations-1):
@@ -477,7 +542,204 @@ class BayesianBasicTrainer(tune.Trainable):
 #######################################################################################################################
 #Active learning Trainer
 #######################################################################################################################
+class RecoverActiveTrainer(BasicTrainer):
+    """
+    Trainer class to perform active learning. Retrains models from scratch after each query. Uses early stopping
+    """
 
+    def setup(self, config):
+        print("Initializing active training pipeline")
+        super(RecoverActiveTrainer, self).setup(config)
+
+        self.acquire_n_at_a_time = config["acquire_n_at_a_time"]
+        self.acquisition = config["acquisition"](config)
+        self.n_epoch_between_queries = config["n_epoch_between_queries"]
+
+        # randomly acquire data at the beginning
+        self.seen_idxs = self.train_idxs[:config["n_initial"]]
+        self.unseen_idxs = self.train_idxs[config["n_initial"]:]
+        self.immediate_regrets = torch.empty(0)
+
+        # Initialize variable that saves the last query
+        self.last_query_idxs = self.seen_idxs
+
+        # Initialize dataloaders
+        self.seen_loader, self.unseen_loader = self.update_loaders(self.seen_idxs, self.unseen_idxs)
+
+        # Get the set of top 1% most synergistic combinations
+        one_perc = int(0.01 * len(self.unseen_idxs))
+        scores = self.data.ddi_edge_response[self.unseen_idxs]
+        self.best_score = scores.max()
+        self.top_one_perc = set(self.unseen_idxs[torch.argsort(scores, descending=True)[:one_perc]].numpy())
+        self.count = 0
+
+    def step(self):
+        # Check whether we have explored everything
+        if len(self.unseen_loader) == 0:
+            print("All space has been explored")
+            return {"all_space_explored": 1, "training_iteration": self.training_it}
+
+        # Train on seen examples
+        if len(self.seen_idxs) > 0:
+            seen_metrics = self.train_between_queries()
+        else:
+            seen_metrics = {}
+
+        # Evaluate on valid set
+        eval_metrics, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
+
+        # Score unseen examples
+        unseen_metrics, unseen_preds = self.eval_epoch(self.data, self.unseen_loader, self.model)
+
+        active_scores = self.acquisition.get_scores(unseen_preds)
+
+        # Build summary
+        seen_metrics = [("seen/" + k, v) for k, v in seen_metrics.items()]
+        unseen_metrics = [("unseen/" + k, v) for k, v in unseen_metrics.items()]
+        eval_metrics = [("eval/" + k, v) for k, v in eval_metrics.items()]
+
+        metrics = dict(
+            seen_metrics
+            + unseen_metrics
+            + eval_metrics
+        )
+
+        # Acquire new data
+        print("query data")
+        query = self.unseen_idxs[torch.argsort(active_scores, descending=True)[:self.acquire_n_at_a_time]]
+
+        # Get the best score among unseen examples
+        self.best_score = self.data.ddi_edge_response[self.unseen_idxs].max().detach().cpu()
+        # remove the query from the unseen examples
+        self.unseen_idxs = self.unseen_idxs[torch.argsort(active_scores, descending=True)[self.acquire_n_at_a_time:]]
+
+        # Add the query to the seen examples
+        self.seen_idxs = torch.cat((self.seen_idxs, query))
+        metrics["seen_idxs"] = self.data.ddi_edge_idx[:, self.seen_idxs].detach().cpu().tolist()
+        metrics["seen_idxs_in_dataset"] = self.seen_idxs.detach().cpu().tolist()
+
+        # Compute proportion of top 1% synergistic drugs which have been discovered
+        query_set = set(query.detach().numpy())
+        self.count += len(query_set & self.top_one_perc)
+        metrics["top"] = self.count / len(self.top_one_perc)
+
+        query_ground_truth = self.data.ddi_edge_response[query].detach().cpu()
+
+        query_pred_syn = unseen_preds[torch.argsort(active_scores, descending=True)[:self.acquire_n_at_a_time]]
+        query_pred_syn = query_pred_syn.detach().cpu()
+
+        metrics["query_pred_syn_mean"] = query_pred_syn.mean().item()
+        metrics["query_true_syn_mean"] = query_ground_truth.mean().item()
+
+        # Diversity metric
+        metrics["n_unique_drugs_in_query"] = len(self.data.ddi_edge_idx[:, query].unique())
+
+        # Get the quantiles of the distribution of true synergy in the query
+        for q in np.arange(0, 1.1, 0.1):
+            metrics["query_pred_syn_quantile_" + str(q)] = np.quantile(query_pred_syn, q)
+            metrics["query_true_syn_quantile_" + str(q)] = np.quantile(query_ground_truth, q)
+
+        query_immediate_regret = torch.abs(self.best_score - query_ground_truth)
+        self.immediate_regrets = torch.cat((self.immediate_regrets, query_immediate_regret))
+
+        metrics["med_immediate_regret"] = self.immediate_regrets.median().item()
+        metrics["log10_med_immediate_regret"] = np.log10(metrics["med_immediate_regret"])
+        metrics["min_immediate_regret"] = self.immediate_regrets.min().item()
+        metrics["log10_min_immediate_regret"] = np.log10(metrics["min_immediate_regret"])
+
+        # Update the dataloaders
+        self.seen_loader, self.unseen_loader = self.update_loaders(self.seen_idxs, self.unseen_idxs)
+
+        metrics["training_iteration"] = self.training_it
+        metrics["all_space_explored"] = 0
+        self.training_it += 1
+
+        return metrics
+
+    def train_between_queries(self):
+        # Create the train and early_stop loaders for this iteration
+        iter_dataset = self.seen_loader.dataset
+        train_length = int(0.8 * len(iter_dataset))
+        early_stop_length = len(iter_dataset) - train_length
+
+        train_dataset, early_stop_dataset = random_split(iter_dataset, [train_length, early_stop_length])
+
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=self.batch_size,
+            pin_memory=(self.device == "cpu"),
+            shuffle=len(train_dataset) > 0,
+        )
+
+        early_stop_loader = DataLoader(
+            early_stop_dataset,
+            batch_size=self.batch_size,
+            pin_memory=(self.device == "cpu"),
+            shuffle=len(early_stop_dataset) > 0,
+        )
+
+        # Reinitialize model before training
+        self.model = self.config["model"](self.data, self.config).to(self.device)
+
+        # Initialize model with weights from file
+        load_model_weights = self.config.get("load_model_weights", False)
+        if load_model_weights:
+            model_weights_file = self.config.get("model_weights_file")
+            model_weights = torch.load(model_weights_file, map_location="cpu")
+            self.model.load_state_dict(model_weights)
+            print("pretrained weights loaded")
+        else:
+            print("model initialized randomly")
+
+        # Reinitialize optimizer
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=self.config["lr"],
+                                      weight_decay=self.config["weight_decay"])
+
+        best_eval_r2 = float("-inf")
+        patience_max = self.config["patience_max"]
+        patience = 0
+
+        for _ in range(self.n_epoch_between_queries):
+            # Perform several training epochs. Save only metrics from the last epoch
+            train_metrics = self.train_epoch(self.data, train_loader, self.model, self.optim)
+
+            early_stop_metrics, _ = self.eval_epoch(self.data, early_stop_loader, self.model)
+
+            if early_stop_metrics["comb_r_squared"] > best_eval_r2:
+                best_eval_r2 = early_stop_metrics["comb_r_squared"]
+                print("best early stop r2", best_eval_r2)
+                patience = 0
+            else:
+                patience += 1
+
+            if patience > patience_max:
+                break
+
+        return train_metrics
+
+    def update_loaders(self, seen_idxs, unseen_idxs):
+        # Seen loader
+        seen_ddi_dataset = get_tensor_dataset(self.data, seen_idxs)
+
+        seen_loader = DataLoader(
+            seen_ddi_dataset,
+            batch_size=self.batch_size,
+            pin_memory=(self.device == "cpu"),
+            shuffle=len(seen_idxs) > 0,
+        )
+
+        # Unseen loader
+        unseen_ddi_dataset = get_tensor_dataset(self.data, unseen_idxs)
+
+        unseen_loader = DataLoader(
+            unseen_ddi_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            pin_memory=(self.device == "cpu"),
+        )
+
+        return seen_loader, unseen_loader
+########################################################################
 
 class ActiveTrainer(BasicTrainer):
     """
@@ -526,26 +788,42 @@ class ActiveTrainer(BasicTrainer):
         else:
             seen_metrics = {}
 
-                # Evaluate on valid set
+        # Evaluate on valid set
         eval_metrics, _ = self.eval_epoch(self.data, self.valid_loader, self.model)
         
+#######################################################
+        unseen_metrics = {}
+        realization_results, unseen_preds = self.eval_epoch(self.data, self.unseen_loader, self.model)
+        unseen_result = dict([("unseen/" + k, [v]) for k, v in realization_results.items()])
         
+        for i in range(self.num_realizations - 1):
+            realization_results, result_tensor = self.eval_epoch(self.data, self.unseen_loader, self.model)
+            unseen_preds = torch.cat((unseen_preds, result_tensor), dim=1)
+            for k, v in realization_results.items():
+                unseen_result["unseen/" + k].append(v)
+                
+        for key in unseen_result:
+            unseen_metrics[str(key)+ "/mean"] = np.mean(unseen_result[key])
+            unseen_metrics[str(key)+ "/std"] = np.var(unseen_result[key])
+
         # Score unseen examples
-        unseen_metrics, unseen_preds = self.eval_epoch(self.data, self.unseen_loader, self.model)
+        # unseen_metrics, unseen_preds = self.eval_epoch(self.data, self.unseen_loader, self.model)
         
 
         active_scores = self.acquisition.get_scores(unseen_preds)
 
         # Build summary
         seen_metrics = [("seen/" + k, v) for k, v in seen_metrics.items()]
-        unseen_metrics = [("unseen/" + k, v) for k, v in unseen_metrics.items()]
+        # unseen_metrics = [("unseen/" + k, v) for k, v in unseen_metrics.items()]
         eval_metrics = [("eval/" + k, v) for k, v in eval_metrics.items()]
 
         metrics = dict(
             seen_metrics
-            + unseen_metrics
+            # + unseen_metrics
             + eval_metrics
         )
+
+        metrics.update(dict(unseen_metrics))
 
         # Acquire new data
         print("query data")

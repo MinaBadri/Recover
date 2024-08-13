@@ -5,6 +5,7 @@ import torchbnn as bnn
 from torch.nn import Parameter
 import math
 import torch.nn.functional as F
+from torch.autograd import Variable
 ########################################################################################################################
 # Modules
 ########################################################################################################################
@@ -116,21 +117,32 @@ class SimpleBayesianLinearModule(bnn.BayesLinear):
 
 
 class ScaleMixtureGaussian(object): #scale mixture Gaussian
-    def __init__(self, pi, sigma1, sigma2):
+    def __init__(self, pi , sigma1, sigma2): #, sigmas):
         super().__init__()
         self.pi = pi
         self.sigma1 = sigma1
         self.sigma2 = sigma2
+        
         self.gaussian1 = torch.distributions.Normal(0,sigma1)
         self.gaussian2 = torch.distributions.Normal(0,sigma2)
     
     def log_prob(self, input):
         prob1 = torch.exp(self.gaussian1.log_prob(input))
+        prob1 = torch.clamp(prob1, 1e-10, 1. )
+
         prob2 = torch.exp(self.gaussian2.log_prob(input))
+        prob2 = torch.clamp(prob2, 1e-10, 1. )
+        
+
+        # Calculate log probability and sum
+        log_prob = torch.log(prob1 + prob2)
+        
+
         if self.pi == 1:
             return torch.log(prob1).sum()
-        return (torch.log(self.pi * prob1 + (1-self.pi) * prob2)).sum()
-        
+        # return (torch.log(self.pi * prob1 + (1-self.pi) * prob2)).sum()
+        return log_prob.sum()
+    
 
 # Hyperparameters for the mixture model
 PI =  0.25 #if pi = 0 and sigma 2 = -4.6, it would be the same as after merge implementation
@@ -138,19 +150,20 @@ SIGMA_1 = torch.FloatTensor([math.exp(-0)]) #torch.FloatTensor([0.005]) #
 SIGMA_2 = torch.FloatTensor([math.exp(-6)]) #
 
 class BayesianLinearModule(nn.Linear):
-    def __init__(self, in_features, out_features):
+    def __init__(self, in_features, out_features): #, config):
         super().__init__(in_features, out_features) #BayesianLinearModule, self
         self.in_features = in_features
         self.out_features = out_features
 
         # Weight parameters
-        self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-0.2, 0.2))
-        self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-5,-4))
+        self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features).normal_(0., .05))
+        self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).normal_(0., .05))
         #self.weight = Gaussian(self.weight_mu, self.weight_rho)
 
         # Bias parameters
-        self.bias_mu = nn.Parameter(torch.Tensor(out_features).uniform_(-0.2, 0.2))
-        self.bias_rho = nn.Parameter(torch.Tensor(out_features).uniform_(-5,-4))
+        self.bias_mu = nn.Parameter(torch.Tensor(out_features).normal_(0., .05))
+        self.bias_rho = nn.Parameter(torch.Tensor(out_features).normal_(0., .05))
+
      
         # Prior distributions
         self.weight_prior = ScaleMixtureGaussian(PI, SIGMA_1, SIGMA_2)
@@ -160,13 +173,13 @@ class BayesianLinearModule(nn.Linear):
 
     def sample_bias(self):
         # Sample bias using reparameterization trick
-        epsilon = torch.distributions.Normal(0,1).sample(self.bias_rho.size())
+        epsilon = Variable(torch.distributions.Normal(0,1).sample(self.bias_rho.size()))
         sigma = torch.log1p(torch.exp(self.bias_rho))
         return self.bias_mu + sigma * epsilon
 
     def sample_weight(self):
         # Sample weight using reparameterization trick
-        epsilon = torch.distributions.Normal(0,1).sample(self.weight_rho.size())
+        epsilon = Variable(torch.distributions.Normal(0,1).sample(self.weight_rho.size()))
         sigma = torch.log1p(torch.exp(self.weight_rho))
         return self.weight_mu + sigma * epsilon
     
@@ -176,43 +189,159 @@ class BayesianLinearModule(nn.Linear):
         return (-math.log(math.sqrt(2 * math.pi))
                 - torch.log(sigma)
                 - ((input - self.bias_mu) ** 2) / (2 * sigma ** 2)).sum()
+        # return self.bias_prior.log_prob(input[0])
 
     def log_prob_weight(self, input):
         # Calculate the log probability of the Weight
         sigma = torch.log1p(torch.exp(self.weight_rho))
         return (-math.log(math.sqrt(2 * math.pi))
                 - torch.log(sigma)
-                - ((input - self.weight_mu) ** 2) / (2 * sigma ** 2)).sum() 
+                - ((input - self.weight_mu) ** 2) / (2 * sigma ** 2)).sum()
+        # return self.weight_prior.log_prob(input[0])
 
     
     def forward(self, input, sample=True):
         x, cell_line = input[0], input[1] #BAYESIAN ADD ON
         
-        # Sample weights and biases
-        weight_mu = self.weight_mu
-        weight_rho = self.weight_rho
-        bias_mu = self.bias_mu
-        bias_rho = self.bias_rho
         
         weight = self.sample_weight()
         bias = self.sample_bias()
-
 
         if self.training and sample:
             # Calculate the log prior and log variational posterior during training
             self.log_prior = self.weight_prior.log_prob(weight) + self.bias_prior.log_prob(bias)
             self.log_variational_posterior = self.log_prob_weight(weight) + self.log_prob_bias(bias)
-          
+                    
         else:
             # Set prior and variational posterior to zero during evaluation
             self.log_prior, self.log_variational_posterior = torch.FloatTensor([0]), torch.FloatTensor([0])
 
         return [F.linear(x, weight, bias), cell_line]
-        
-    
+
     def kl_loss(self):
         # Calculate the Kullback-Leibler divergence loss
         return self.log_variational_posterior - self.log_prior
+
+##################
+# class ScaleMixtureGaussian(object):
+#     def __init__(self, pis, sigmas):
+#         super().__init__()
+#         self.pis = pis
+#         self.sigmas = sigmas
+#         self.gaussians = [torch.distributions.Normal(0, sigma) for sigma in sigmas]
+
+#     def log_prob(self, input):
+#         probs = [g.log_prob(input) for g in self.gaussians]
+#         weighted_probs = [pi * prob.exp() for pi, prob in zip(self.pis, probs)]
+#         print("torch.log(sum(weighted_probs)).sum(): ", torch.log(sum(weighted_probs)).sum())
+#         return torch.log(sum(weighted_probs)).sum()
+
+# # Hyperparameters for the mixture model
+# N = 4  # Number of Gaussians
+# SIGMAS = [torch.FloatTensor([math.exp(-i)]) for i in range(1, N + 1)]  
+
+# class BayesianLinearModule(nn.Linear):
+#     def __init__(self, in_features, out_features):
+#         super().__init__(in_features, out_features)
+#         self.in_features = in_features
+#         self.out_features = out_features
+
+#         # Weight parameters
+#         self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-0.2, 0.2))
+#         self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-5, -4))
+
+#         # Bias parameters
+#         self.bias_mu = nn.Parameter(torch.Tensor(out_features).uniform_(-0.2, 0.2))
+#         self.bias_rho = nn.Parameter(torch.Tensor(out_features).uniform_(-5, -4))
+
+#         print("self.weight_mu.shape: ", self.weight_mu.shape)
+#         print("self.weight_rho.shape: ",self.weight_rho.shape)
+
+#         # Calculate pi values based on the weight parameters
+#         # weights = [(self.weight_mu[i].item() + torch.log1p(torch.exp(self.weight_rho[i])).item()) for i in range(N)]
+#         weights = [(self.weight_mu[i, j].item() + torch.log1p(torch.exp(self.weight_rho[i, j])).item())
+#                     for i in range(self.weight_mu.size(0)) for j in range(self.weight_mu.size(1))]
+
+#         total_weights = sum(weights)
+#         self.pis = [weight / total_weights for weight in weights]
+
+#         # Prior distributions
+#         self.weight_prior = ScaleMixtureGaussian(self.pis, SIGMAS)
+#         self.bias_prior = ScaleMixtureGaussian(self.pis, SIGMAS)
+#         self.log_prior = 0
+#         self.log_variational_posterior = 0
+
+#     def sample_bias(self):
+#         # Sample bias using reparameterization trick
+#         epsilon = torch.distributions.Normal(0,1).sample(self.bias_rho.size())
+#         sigma = torch.log1p(torch.exp(self.bias_rho))
+#         return self.bias_mu + sigma * epsilon
+
+#     def sample_weight(self):
+#         # Sample weight using reparameterization trick
+#         epsilon = torch.distributions.Normal(0,1).sample(self.weight_rho.size())
+#         sigma = torch.log1p(torch.exp(self.weight_rho))
+#         return self.weight_mu + sigma * epsilon
+    
+#     def log_prob_bias(self, input):
+#         # Calculate the log probability of the bias
+#         sigma = torch.log1p(torch.exp(self.bias_rho))
+#         return (-math.log(math.sqrt(2 * math.pi))
+#                 - torch.log(sigma)
+#                 - ((input - self.bias_mu) ** 2) / (2 * sigma ** 2)).sum()
+#         # return self.bias_prior.log_prob(input[0])
+
+#     def log_prob_weight(self, input):
+#         # Calculate the log probability of the Weight
+#         sigma = torch.log1p(torch.exp(self.weight_rho))
+#         return (-math.log(math.sqrt(2 * math.pi))
+#                 - torch.log(sigma)
+#                 - ((input - self.weight_mu) ** 2) / (2 * sigma ** 2)).sum()
+#         # return self.weight_prior.log_prob(input[0])
+
+    
+#     def forward(self, input, sample=True):
+#         x, cell_line = input[0], input[1] #BAYESIAN ADD ON
+        
+#         # Sample weights and biases
+#         # weight_mu = self.weight_mu
+#         # weight_rho = self.weight_rho
+#         # bias_mu = self.bias_mu
+#         # bias_rho = self.bias_rho
+        
+#         weight = self.sample_weight()
+#         bias = self.sample_bias()
+
+
+#         # if self.training and sample:
+#         #     # Calculate the log prior and log variational posterior during training
+#         #     self.log_prior = self.weight_prior.log_prob(weight) + self.bias_prior.log_prob(bias)
+#         #     self.log_variational_posterior = self.log_prob_weight(weight) + self.log_prob_bias(bias)
+          
+#         # else:
+#         #     # Set prior and variational posterior to zero during evaluation
+#         #     self.log_prior, self.log_variational_posterior = torch.FloatTensor([0]), torch.FloatTensor([0])
+        
+#         # print("Maximum value in weight tensor:", torch.max(weight).item())
+#         # print("Minimum value in weight tensor:", torch.min(weight).item())
+
+#         self.log_prior = self.weight_prior.log_prob(weight) + self.bias_prior.log_prob(bias)
+#         self.log_variational_posterior = self.log_prob_weight(weight) + self.log_prob_bias(bias)
+
+#         return [F.linear(x, weight, bias), cell_line]
+        
+    
+#     def kl_loss(self):
+#         # Calculate the Kullback-Leibler divergence loss
+#         return self.log_variational_posterior - self.log_prior
+# # def kl_loss(self):
+# #     # Calculate the Kullback-Leibler divergence loss
+# #     kl_loss = 0.5 * torch.sum(self.weight_prior.log_prob(self.weight_mu) - self.log_variational_posterior)
+# #     kl_loss += 0.5 * torch.sum(self.bias_prior.log_prob(self.bias_mu) - self.log_variational_posterior)
+# #     return kl_loss
+
+
+
 
 #Sparse Variational Dropout(SVDO) on Bayesian Nueral Network
 class BayesianLinearDropoutModule(nn.Linear):
@@ -226,6 +355,8 @@ class BayesianLinearDropoutModule(nn.Linear):
         self.W_rho = Parameter(torch.Tensor(out_features, in_features).uniform_(-5, -4))  # Initialize rho
         self.bias_mu = Parameter(torch.Tensor(out_features).normal_(mean=prior_mu, std=prior_sigma))
         self.bias_rho = Parameter(torch.Tensor(out_features).uniform_(-5, -4))  # Initialize rho
+
+        self.log_alpha = None
         
     #     self.reset_parameters()
 
@@ -242,12 +373,6 @@ class BayesianLinearDropoutModule(nn.Linear):
         epsilon = torch.randn_like(self.bias_mu)  # Sample random noise
         sigma = torch.log1p(torch.exp(self.bias_rho))  # Calculate sigma from rho
         return self.bias_mu + sigma * epsilon  # Return sampled bias
-    
-    def kl_reg(self):
-        # Calculate KL divergence regularization term
-        kl = 0.5 * (self.W_rho.exp().pow(2) + self.W_mu.pow(2) - 2 * self.W_rho - 1).sum() + \
-             0.5 * (self.bias_rho.exp().pow(2) + self.bias_mu.pow(2) - 2 * self.bias_rho - 1).sum()
-        return kl
         
     def forward(self, input):
         x, cell_line = input[0], input[1]
@@ -259,6 +384,7 @@ class BayesianLinearDropoutModule(nn.Linear):
         # Calculate log_alpha
         log_alpha = self.W_rho * 2.0 - 2.0 * torch.log(1e-16 + torch.abs(weight))
         log_alpha = torch.clamp(log_alpha, -10, 10) 
+        self.log_alpha = log_alpha
         
         if self.training:
             lrt_mean = F.linear(x, weight) + bias
@@ -268,6 +394,85 @@ class BayesianLinearDropoutModule(nn.Linear):
     
         # Apply sparse variational dropout during inference
         return [F.linear(x, weight * (log_alpha < self.threshold).float()) + bias, cell_line]
+    
+    def kl_loss(self):
+        # Calculate KL divergence regularization term
+        kl_weight_bias = 0.5 * (self.W_rho.exp().pow(2) + self.W_mu.pow(2) - 2 * self.W_rho - 1).sum() + \
+             0.5 * (self.bias_rho.exp().pow(2) + self.bias_mu.pow(2) - 2 * self.bias_rho - 1).sum()
+        kl_dropout = -torch.sum(F.softplus(-self.log_alpha))
+        return kl_weight_bias + kl_dropout
+
+class LaplacePrior(object):
+    def __init__(self, scale):
+        super().__init__()
+        self.scale = scale
+        self.laplace = torch.distributions.Laplace(0, scale)
+    
+    def log_prob(self, input):
+        return self.laplace.log_prob(input).sum()
+
+# Hyperparameter for Laplace prior
+SCALE = torch.FloatTensor([math.exp(-4)]) 
+
+class LaplaceBayesianLinearModule(nn.Linear):
+    def __init__(self, in_features, out_features):
+        super().__init__(in_features, out_features)
+        self.in_features = in_features
+        self.out_features = out_features
+
+        # Weight parameters
+        self.weight_mu = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-0.2, 0.2))
+        self.weight_rho = nn.Parameter(torch.Tensor(out_features, in_features).uniform_(-5, -4))
+
+        # Bias parameters
+        self.bias_mu = nn.Parameter(torch.Tensor(out_features).uniform_(-0.2, 0.2))
+        self.bias_rho = nn.Parameter(torch.Tensor(out_features).uniform_(-5, -4))
+
+        # Prior distributions
+        self.weight_prior = LaplacePrior(SCALE)
+        self.bias_prior = LaplacePrior(SCALE)
+        self.log_prior = 0
+        self.log_variational_posterior = 0
+
+    def sample_bias(self):
+        epsilon = torch.distributions.Normal(0, 1).sample(self.bias_rho.size())
+        sigma = torch.log1p(torch.exp(self.bias_rho))
+        return self.bias_mu + sigma * epsilon
+
+    def sample_weight(self):
+        epsilon = torch.distributions.Normal(0, 1).sample(self.weight_rho.size())
+        sigma = torch.log1p(torch.exp(self.weight_rho))
+        return self.weight_mu + sigma * epsilon
+    
+    def log_prob_bias(self, input):
+        sigma = torch.log1p(torch.exp(self.bias_rho))
+        return (-math.log(2 * self.bias_prior.scale)
+            - torch.abs(input - self.bias_mu) / sigma
+            - torch.log(sigma)).sum()
+
+    def log_prob_weight(self, input):
+        sigma = torch.log1p(torch.exp(self.weight_rho))
+        return (-math.log(2 * self.weight_prior.scale)
+            - torch.abs(input - self.weight_mu) / sigma
+            - torch.log(sigma)).sum()
+    
+    def forward(self, input, sample=True):
+        x, cell_line = input[0], input[1]
+
+        weight = self.sample_weight()
+        bias = self.sample_bias()
+
+        if self.training and sample:
+            self.log_prior = self.weight_prior.log_prob(weight) + self.bias_prior.log_prob(bias)
+            self.log_variational_posterior = self.log_prob_weight(weight) + self.log_prob_bias(bias)
+          
+        else:
+            self.log_prior, self.log_variational_posterior = torch.FloatTensor([0]), torch.FloatTensor([0])
+
+        return [F.linear(x, weight, bias), cell_line]
+    
+    def kl_loss(self):
+        return self.log_variational_posterior - self.log_prior
 
 ########################################################################################################################
 # Advanced Bayesian MLP
@@ -290,6 +495,7 @@ class AdvancedBayesianBilinearMLPPredictor(nn.Module): #BAYESIAN ADD ON
         # self.layers = BayesianLinearModule(in_features, out_features)
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
+        self.Laplace_prior = config["Laplace_prior"]
 
         
         assert 0 < self.merge_n_layers_before_the_end < len(predictor_layers)
@@ -409,13 +615,7 @@ class AdvancedBayesianBilinearMLPPredictor(nn.Module): #BAYESIAN ADD ON
         return layers
 
     def add_bayesian_layer(self, layers, i, dim_i, dim_i_plus_1):
-
-        # Add a Bayesian layer to the list of layers
-        # layers.extend(self.bayesian_linear_layer(i, mu, sigma, dim_i, dim_i_plus_1))
-        # bayesian_linear_layer = [BayesianLinearModule(dim_i, dim_i_plus_1)]
-        
         layers.extend(self.bayesian_linear_layer(i, dim_i, dim_i_plus_1))
-        
         
         if i != len(self.layer_dims) - 2:
             layers.append(ReLUModule())
@@ -432,9 +632,13 @@ class AdvancedBayesianBilinearMLPPredictor(nn.Module): #BAYESIAN ADD ON
 
         elif self.variational_dropout:
             return [BayesianLinearDropoutModule(dim_i, dim_i_plus_1)]
+        
+        elif self.Laplace_prior:
+            return [LaplaceBayesianLinearModule(dim_i, dim_i_plus_1)]
+
         else:
             return [BayesianLinearModule(dim_i, dim_i_plus_1)]
-
+            
     def linear_layer(self, i, dim_i, dim_i_plus_1):
         # Return a linear layer
         return [LinearModule(dim_i, dim_i_plus_1)]
@@ -451,6 +655,7 @@ class AdvancedBayesianBilinearMLPPredictor(nn.Module): #BAYESIAN ADD ON
             for layer in self.after_merge_mlp:
                 if hasattr(layer, "kl_loss"):
                     kl += layer.kl_loss()
+            
             return kl
     
 #Recover Original MLPs 
@@ -576,6 +781,9 @@ class BilinearFilmMLPPredictor(AdvancedBayesianBilinearMLPPredictor):
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
 
+        self.Laplace_prior = config["Laplace_prior"]
+
+
     def linear_layer(self, i, dim_i, dim_i_plus_1):
         return [LinearModule(dim_i, dim_i_plus_1), FilmModule(self.num_cell_lines, self.layer_dims[i + 1])]
   
@@ -590,6 +798,8 @@ class BilinearFilmWithFeatMLPPredictor(AdvancedBayesianBilinearMLPPredictor):
         super(BilinearFilmWithFeatMLPPredictor, self).__init__(data, config, predictor_layers)
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
+
+        self.Laplace_prior = config["Laplace_prior"]
         
 
     def linear_layer(self, i, dim_i, dim_i_plus_1):
@@ -614,6 +824,9 @@ class BilinearLinFilmWithFeatMLPPredictor(BilinearFilmWithFeatMLPPredictor):
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
 
+        self.Laplace_prior = config["Laplace_prior"]
+
+
 
     def linear_layer(self, i, dim_i, dim_i_plus_1):
         return [LinearModule(dim_i, dim_i_plus_1), LinearFilmWithFeatureModule(self. cl_features_dim, self.layer_dims[i + 1])]
@@ -637,6 +850,9 @@ class BayesianMLPPredictor(nn.Module):
 
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
+
+        self.Laplace_prior = config["Laplace_prior"]
+
 
         assert 0 < self.merge_n_layers_before_the_end < len(predictor_layers)
 
@@ -719,6 +935,10 @@ class BayesianMLPPredictor(nn.Module):
 
         elif self.variational_dropout:
             return [BayesianLinearDropoutModule(dim_i, dim_i_plus_1)]
+        
+        elif self.Laplace_prior:
+            return [LaplaceBayesianLinearModule(dim_i, dim_i_plus_1)]
+
 
         else:
             return [BayesianLinearModule(dim_i, dim_i_plus_1)]
@@ -833,6 +1053,9 @@ class FilmMLPPredictor(BayesianMLPPredictor):
         super(FilmMLPPredictor, self).__init__(data, config, predictor_layers)
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
+
+        self.Laplace_prior = config["Laplace_prior"]
+
         
 
     def linear_layer(self, i, dim_i, dim_i_plus_1):
@@ -844,7 +1067,9 @@ class FilmWithFeatMLPPredictor(BayesianMLPPredictor):
         self. cl_features_dim = data.cell_line_features.shape[1]
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
-        super(FilmWithFeatMLPPredictor, self).__init__(data, config, predictor_layers)
+
+        self.Laplace_prior = config["Laplace_prior"]
+
         
     def linear_layer(self, i, dim_i, dim_i_plus_1):
         return [LinearModule(dim_i, dim_i_plus_1), FilmWithFeatureModule(self. cl_features_dim, self.layer_dims[i + 1])]
@@ -867,6 +1092,9 @@ class LinFilmWithFeatMLPPredictor(FilmWithFeatMLPPredictor):
         super(LinFilmWithFeatMLPPredictor, self).__init__(data, config, predictor_layers)
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
+
+        self.Laplace_prior = config["Laplace_prior"]
+
 
     def linear_layer(self, i, dim_i, dim_i_plus_1):
         return [LinearModule(dim_i, dim_i_plus_1), LinearFilmWithFeatureModule(self. cl_features_dim, self.layer_dims[i + 1])]
@@ -981,6 +1209,9 @@ class ShuffledBilinearFilmMLPPredictor(ShuffledBilinearMLPPredictor):
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
 
+        self.Laplace_prior = config["Laplace_prior"]
+
+
     def linear_layer(self, i, dim_i, dim_i_plus_1):
         return [LinearModule(dim_i, dim_i_plus_1), FilmModule(self.num_cell_lines, self.layer_dims[i + 1])]
         
@@ -990,7 +1221,9 @@ class ShuffledBilinearFilmWithFeatMLPPredictor(ShuffledBilinearMLPPredictor):
         self. cl_features_dim = data.cell_line_features.shape[1]
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
-        super(ShuffledBilinearFilmWithFeatMLPPredictor, self).__init__(data, config, predictor_layers)
+
+        self.Laplace_prior = config["Laplace_prior"]
+
 
     def linear_layer(self, i, dim_i, dim_i_plus_1):
         return [LinearModule(dim_i, dim_i_plus_1), FilmWithFeatureModule(self. cl_features_dim, self.layer_dims[i + 1])]
@@ -1013,6 +1246,9 @@ class ShuffledBilinearLinFilmWithFeatMLPPredictor(ShuffledBilinearFilmWithFeatML
         super(ShuffledBilinearLinFilmWithFeatMLPPredictor, self).__init__(data, config, predictor_layers)
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
+
+        self.Laplace_prior = config["Laplace_prior"]
+
 
     def linear_layer(self, i, dim_i, dim_i_plus_1):
         return [LinearModule(dim_i, dim_i_plus_1), LinearFilmWithFeatureModule(self. cl_features_dim, self.layer_dims[i + 1])]
@@ -1047,6 +1283,9 @@ class PartiallyShuffledBilinearFilmMLPPredictor(PartiallyShuffledBilinearMLPPred
         super(PartiallyShuffledBilinearFilmMLPPredictor, self).__init__(data, config, predictor_layers)
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
+
+        self.Laplace_prior = config["Laplace_prior"]
+
         
 
     def linear_layer(self, i, dim_i, dim_i_plus_1):
@@ -1057,7 +1296,9 @@ class PartiallyShuffledBilinearFilmWithFeatMLPPredictor(PartiallyShuffledBilinea
         self. cl_features_dim = data.cell_line_features.shape[1]
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
-        super(PartiallyShuffledBilinearFilmWithFeatMLPPredictor, self).__init__(data, config, predictor_layers)
+
+        self.Laplace_prior = config["Laplace_prior"]
+
         
 
     def linear_layer(self, i, dim_i, dim_i_plus_1):
@@ -1081,6 +1322,9 @@ class PartiallyShuffledBilinearLinFilmWithFeatMLPPredictor(PartiallyShuffledBili
         super(PartiallyShuffledBilinearLinFilmWithFeatMLPPredictor, self).__init__(data, config, predictor_layers)
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
+
+        self.Laplace_prior = config["Laplace_prior"]
+
         
 
     def linear_layer(self, i, dim_i, dim_i_plus_1):
@@ -1106,6 +1350,9 @@ class simpleBayesianBilinearMLPPredictor(torch.nn.Module):
 
         self.bayesian_single_prior = config["bayesian_single_prior"]
         self.variational_dropout = config["variational_dropout"]
+
+        self.Laplace_prior = config["Laplace_prior"]
+
 
         assert 0 < self.merge_n_layers_before_the_end < len(predictor_layers)
 
@@ -1213,6 +1460,9 @@ class simpleBayesianBilinearMLPPredictor(torch.nn.Module):
         return [LinearModule(dim_i, dim_i_plus_1)]
         
     def bayes_linear_layer(self, i, dim_i, dim_i_plus_1):
-        # return [SimpleBayesianLinearModule(dim_i, dim_i_plus_1)]
-        return [BayesianLinearDropoutModule(dim_i, dim_i_plus_1)]
+
+        if self.bayesian_single_prior:
+            return [SimpleBayesianLinearModule(dim_i, dim_i_plus_1)]
+        elif self.variational_dropout:
+            return [BayesianLinearDropoutModule(dim_i, dim_i_plus_1)]
         

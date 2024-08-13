@@ -1,9 +1,8 @@
-from recover.datasets.drugcomb_matrix_data import DrugCombMatrix
+from recover.datasets.drugcomb_matrix_data import DrugCombMatrixDrugLevelSplitTrain
 from recover.models.models import Baseline
-from recover.models.predictors import AdvancedBayesianBilinearMLPPredictor, simpleBayesianBilinearMLPPredictor
+from recover.models.predictors import BilinearFilmMLPPredictor, AdvancedBayesianBilinearMLPPredictor, MLPPredictor
 from recover.utils.utils import get_project_root
-from recover.train import train_epoch_bayesian,  BayesianBasicTrainer,\
-eval_epoch, BasicTrainer
+from recover.train import train_epoch, eval_epoch, BasicTrainer, BayesianBasicTrainer, train_epoch_bayesian
 import os
 from ray import tune
 from importlib import import_module
@@ -16,10 +15,11 @@ from importlib import import_module
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([2,3,4]),
-    "bayesian_single_prior": False,
-    "variational_dropout" : True,
+    "seed": tune.grid_search([1, 2, 3]),
+    "bayesian_single_prior": True,
+    "variational_dropout" : False,
     "Laplace_prior" : False,
+    # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
     "batch_size": 128,
@@ -30,7 +30,7 @@ pipeline_config = {
 
 predictor_config = {
     "predictor": AdvancedBayesianBilinearMLPPredictor,
-    
+    # "num_realizations": 10, # For bayesian uncertainty
     "predictor_layers":
         [
             2048,
@@ -49,18 +49,21 @@ model_config = {
 }
 
 dataset_config = {
-    "dataset": DrugCombMatrix,
+    "dataset": DrugCombMatrixDrugLevelSplitTrain,
     "study_name": 'ALMANAC',
     "in_house_data": 'without',
     "rounds_to_include": [],
     "val_set_prop": 0.2,
-    "test_set_prop": 0.1,
+    "test_set_prop": 0.0,
     "test_on_unseen_cell_line": False,
     "split_valid_train": "pair_level",
     "cell_line": 'MCF7',  # 'PC-3',
     "target": "bliss_max",  # tune.grid_search(["css", "bliss", "zip", "loewe", "hsa"]),
     "fp_bits": 1024,
-    "fp_radius": 2
+    "fp_radius": 2,
+    "add_noise": True,
+    "noise_type": 'salt_pepper', # 'gaussian', 'salt_pepper', 'random'
+    "noise_prop": 0.1,
 }
 
 ########################################################################################################################
@@ -68,7 +71,7 @@ dataset_config = {
 ########################################################################################################################
 
 configuration = {
-    "trainer":  BayesianBasicTrainer,  # PUT NUM GPU BACK TO 1
+    "trainer": BayesianBasicTrainer,  # PUT NUM GPU BACK TO 1
     "trainer_config": {
         **pipeline_config,
         **predictor_config,
@@ -77,13 +80,14 @@ configuration = {
     },
     "summaries_dir": os.path.join(get_project_root(), "RayLogs"),
     "memory": 1800,
-    "stop": {"training_iteration":1000, 'patience': 10},
+    "stop": {"training_iteration": 1000, 'patience': 10},
     "checkpoint_score_attr": 'eval/comb_r_squared',
     "keep_checkpoints_num": 1,
     "checkpoint_at_end": True,
     "checkpoint_freq": 0,
-    "resources_per_trial": {"cpu": 8, "gpu": 0},
+    "resources_per_trial": {"cpu": 16, "gpu": 0},
     "scheduler": None,
-    "search_alg": None,
-    "bayesian_single_prior": False
+    "bayesian_single_prior": True,
+    "search_alg": None
+    
 }

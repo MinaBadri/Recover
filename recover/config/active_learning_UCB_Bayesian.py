@@ -29,9 +29,11 @@ pipeline_config = {
 predictor_config = {
     "predictor": AdvancedBayesianBilinearMLPPredictor,
     "num_realizations": 5,
-    #Never set bayesian_single_prior and variational_dropout True at the same time
-    "bayesian_single_prior": False,  #True if one Gaussian is the prior
-    "variational_dropout" : False,   #True if we want to have a dropout in single Gaussian prior
+    #If all three following configs are false, the model is using scale mixture prior
+    "bayesian_single_prior": False,
+    "variational_dropout" : False,
+    "Laplace_prior" : False,
+
     "predictor_layers":
         [
             2048,
@@ -41,6 +43,7 @@ predictor_config = {
         ],
     "merge_n_layers_before_the_end": 2,  # Computation on the sum of the two drug embeddings for the last n layers
     "allow_neg_eigval": True,
+    "num_realizations": 5,
     "stop": {"training_iteration": 1000, 'patience': 4}
 }
 
@@ -79,7 +82,7 @@ dataset_config = {
 
 active_learning_config = {
     "ensemble_size": 5,
-    "acquisition": tune.grid_search([GreedyAcquisition, UCB, RandomAcquisition]), #ProbabilityOfImprovementAcquisition, UCB, ExpectedImprovementAcquisition]), #([GreedyAcquisition, UCB, RandomAcquisition]),
+    "acquisition": tune.grid_search([UCB, GreedyAcquisition,RandomAcquisition]), 
     "patience_max": 4,
     "kappa": 1,
     "kappa_decrease_factor": 1,

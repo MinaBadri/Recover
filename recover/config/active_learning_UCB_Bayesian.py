@@ -16,7 +16,7 @@ from ray import tune
 pipeline_config = {
     "use_tune": True,
     "num_epoch_without_tune": 500,  # Used only if "use_tune" == False
-    "seed": tune.grid_search([1, 2, 3]),
+    "seed": tune.grid_search([1]), #([1, 2, 3]),
     # Optimizer config
     "lr": 1e-4,
     "weight_decay": 1e-2,
@@ -33,6 +33,7 @@ predictor_config = {
     "bayesian_single_prior": False,
     "variational_dropout" : False,
     "Laplace_prior" : False,
+
     "predictor_layers":
         [
             2048,

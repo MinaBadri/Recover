@@ -61,6 +61,7 @@ def train_epoch(data, loader, model, optim):
 def train_epoch_bayesian(data, loader, model, optim, config):
     
     bayesian_single_prior = config["bayesian_single_prior"]
+    self.variational_dropout = config["variational_dropout"]
     
     model.train()
     epoch_loss = 0
@@ -352,6 +353,10 @@ class BayesianBasicTrainer(tune.Trainable):
 
         self.batch_size = config["batch_size"]
         self.bayesian_single_prior = config["bayesian_single_prior"]
+
+        self.variational_dropout = config["variational_dropout"]
+        
+
 
         device_type = "cuda" if torch.cuda.is_available() else "cpu"
         self.device = torch.device(device_type)

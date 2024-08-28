@@ -435,12 +435,25 @@ class LaplaceBayesianLinearModule(nn.Linear):
         self.log_variational_posterior = 0
 
     def sample_bias(self):
-        epsilon = torch.distributions.Normal(0, 1).sample(self.bias_rho.size())
+        
+        laplace_dist = torch.distributions.Laplace(0, 1)
+    
+        # Sample epsilon from the Laplace distribution
+        epsilon = laplace_dist.sample(self.bias_rho.size())
+        
         sigma = torch.log1p(torch.exp(self.bias_rho))
+        
+        # Return the sampled weight
         return self.bias_mu + sigma * epsilon
+        
+        # epsilon = torch.distributions.laplace(0, 1).sample(self.bias_rho.size())
+        # sigma = torch.log1p(torch.exp(self.bias_rho))
+        # return self.bias_mu + sigma * epsilon
 
     def sample_weight(self):
-        epsilon = torch.distributions.Normal(0, 1).sample(self.weight_rho.size())
+        laplace_dist = torch.distributions.Laplace(0, 1)
+        epsilon = laplace_dist.sample(self.weight_rho.size())
+        # epsilon = torch.distributions.laplace(0, 1).sample(self.weight_rho.size())
         sigma = torch.log1p(torch.exp(self.weight_rho))
         return self.weight_mu + sigma * epsilon
     

@@ -61,9 +61,9 @@ p(x; \mu, b) = \frac{1}{2b} \exp\left(-\frac{|x - \mu|}{b}\right)
 $$
 
 
-where $$\mu$$ represents the location parameter (mean) and $$\b$$ denotes the scale parameter (standard deviation).
+where $$\mu$$ represents the location parameter (mean) and $$b$$ denotes the scale parameter (standard deviation).
 
-For details on the implementation of Laplace priors in the Bayesian framework, please look at Laolace prior and Laplace BNN functions in recover/models/predictors.py
+For details on the implementation of Laplace priors in the Bayesian framework, please look at Laolace prior and Laplace BNN functions in the **[implementation](https://github.com/MinaBadri/Recover/blob/5e87e5d26753e224d91521f37005b939fb3cdbbc/recover/models/predictors.py#L405)**
 
 ## References
 
